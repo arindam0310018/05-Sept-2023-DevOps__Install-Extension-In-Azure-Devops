@@ -1,0 +1,200 @@
+trigger:
+  none
+
+######################
+# Declare Parameters:-
+######################
+parameters: 
+- name: DevOpsOrganisation
+  type: string
+  default: https://dev.azure.com/ArindamMitra0251
+  values:
+  - https://dev.azure.com/ArindamMitra0251
+
+- name: ExtensionID
+  type: string
+  default: octopus-deploy-build-release-tasks
+  values:
+  - octopus-deploy-build-release-tasks
+
+- name: PublisherID
+  type: string
+  default: octopusdeploy
+  values:
+  - octopusdeploy
+
+- name: InstallOrUninstall
+  type: string
+  default: Install
+  values:
+  - Install
+  - Uninstall
+
+- name: KVName
+  displayName: Please Provide the Keyvault Name:-
+  type: object
+  default: ampockv
+  values:
+  - ampockv
+
+#######################
+# Declare Variables:-
+#######################
+variables:
+  ServiceConnection: amcloud-cicd-service-connection
+  BuildAgent: ubuntu-latest
+  envName: NonProd
+  
+######################
+# Declare Build Agent:-
+######################
+pool:
+  vmImage: $(BuildAgent)
+
+###################
+# Declare Stages:-
+###################
+stages:
+###################
+# Stage: Install
+###################
+- stage: Install_Octopus_Extension
+  condition: |
+       eq('${{ parameters.InstallOrUninstall }}', 'Install')
+  jobs:
+  - deployment: 
+    displayName: Install Octopus Extension
+    environment: '$(envName)'
+    pool:
+      vmImage: $(BuildAgent)
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+########################################################
+# Install Az DevOps CLI Extension in the Build Agent:-
+#######################################################
+          - task: AzureCLI@1
+            displayName: Install Devops CLI Extension
+            inputs:
+              azureSubscription: '$(ServiceConnection)'
+              scriptType: ps
+              scriptLocation: inlineScript
+              inlineScript: |
+                az extension add --name azure-devops
+                az extension show --name azure-devops --output table
+###############################################################
+# Help Option of Az DevOps CLI Extension in the Build Agent:-
+###############################################################
+          - task: PowerShell@2
+            displayName: Help Option of Az Devops CLI
+            inputs:
+              targetType: 'inline'
+              script: |
+                az devops -h
+################################        
+# Download Keyvault Secrets:-
+################################
+          - task: AzureKeyVault@2
+            displayName: Fetch all Secrets from Keyvault
+            inputs:
+              azureSubscription: '$(ServiceConnection)'
+              KeyVaultName: '${{ parameters.KVName }}'
+              SecretsFilter: '*'
+              RunAsPreJob: false
+#########################################
+# Install Octopus Extension in DevOps:-
+#########################################
+          - task: PowerShell@2
+            displayName: Install Octopus Extension in DevOps
+            inputs:
+              targetType: 'inline'
+              script: |
+                echo "$(PAT)" | az devops login
+                $octopusExt = az devops extension show --extension-id ${{ parameters.ExtensionID }} --publisher-id ${{ parameters.PublisherID }} --org ${{ parameters.DevOpsOrganisation }} --query "extensionName" -o tsv                  
+                if ($octopusExt -eq "Octopus Deploy Integration") {
+                    echo "##############################################################################################"
+                    echo "Octopus Extension ${{ parameters.PublisherID }} is ALREADY INSTALLED, hence cannot proceed !!!"
+                    echo "##############################################################################################"
+                    exit 1              
+                      }
+                      else {
+                        az devops extension install --extension-id ${{ parameters.ExtensionID }} --publisher-id ${{ parameters.PublisherID }} --org ${{ parameters.DevOpsOrganisation }}             
+                        echo "#########################################################################################################"
+                        echo "Octopus Extension ${{ parameters.PublisherID }} INSTALLED successfully in Azure DevOps Organisation !!!"
+                        echo "#########################################################################################################"
+                          }      
+###################
+# Stage: Uninstall
+###################
+- stage: Uninstall_Octopus_Extension
+  condition: |
+       eq('${{ parameters.InstallOrUninstall }}', 'Uninstall')
+  jobs:
+  - deployment: 
+    displayName: Uninstall Octopus Extension
+    environment: '$(envName)'
+    pool:
+      vmImage: $(BuildAgent)
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+########################################################
+# Install Az DevOps CLI Extension in the Build Agent:-
+#######################################################
+          - task: AzureCLI@1
+            displayName: Install Devops CLI Extension
+            inputs:
+              azureSubscription: '$(ServiceConnection)'
+              scriptType: ps
+              scriptLocation: inlineScript
+              inlineScript: |
+                az extension add --name azure-devops
+                az extension show --name azure-devops --output table
+###############################################################
+# Help Option of Az DevOps CLI Extension in the Build Agent:-
+###############################################################
+          - task: PowerShell@2
+            displayName: Help Option of Az Devops CLI
+            inputs:
+              targetType: 'inline'
+              script: |
+                az devops -h
+################################        
+# Download Keyvault Secrets:-
+################################
+          - task: AzureKeyVault@2
+            displayName: Fetch all Secrets from Keyvault
+            inputs:
+              azureSubscription: '$(ServiceConnection)'
+              KeyVaultName: '${{ parameters.KVName }}'
+              SecretsFilter: '*'
+              RunAsPreJob: false  
+#########################################
+# Uninstall Octopus Extension in DevOps:-
+#########################################
+          - task: PowerShell@2
+            displayName: Uninstall Octopus Extension in DevOps
+            inputs:
+              targetType: 'inline'
+              script: |
+                echo "$(PAT)" | az devops login
+                $octopusExt = az devops extension show --extension-id ${{ parameters.ExtensionID }} --publisher-id ${{ parameters.PublisherID }} --org ${{ parameters.DevOpsOrganisation }} --query "extensionName" -o tsv                  
+                if ($octopusExt -eq "Octopus Deploy Integration") {
+                    echo "##############################################################################################"
+                    echo "Octopus Extension ${{ parameters.PublisherID }} is AVAILABLE. Proceeding to Uninstall..."
+                    echo "##############################################################################################"
+                    az devops extension uninstall --extension-id ${{ parameters.ExtensionID }} --publisher-id ${{ parameters.PublisherID }} --org ${{ parameters.DevOpsOrganisation }} --yes              
+                    echo "###############################################################################"
+                    echo "Octopus Extension ${{ parameters.PublisherID }} UNINSTALLED successfully!!!"
+                    echo "###############################################################################"
+                    }
+                    else {
+                      echo "##############################################################################################"
+                      echo "Octopus Extension ${{ parameters.PublisherID }} is NOT AVAILABLE, hence cannot uninstall !!!"
+                      echo "##############################################################################################"
+                      exit 1
+                      }
+
+
